@@ -139,10 +139,10 @@
             };
 
             adapter = lib.mkOption {
-              type = lib.types.str;
-              default = "auto";
+              type = lib.types.nullOr lib.types.str;
+              default = null;
               example = "hci0";
-              description = "Bluetooth adapter to use (auto-detects when set to \"auto\").";
+              description = "Bluetooth adapter to use. Null lets bluehood auto-detect.";
             };
 
             dataDir = lib.mkOption {
@@ -176,8 +176,8 @@
                 ExecStart = lib.escapeShellArgs (
                   [ cfg.executable
                     "--port" (toString cfg.port)
-                    "--adapter" cfg.adapter
-                  ] ++ cfg.extraArgs
+                  ] ++ lib.optionals (cfg.adapter != null) [ "--adapter" cfg.adapter ]
+                    ++ cfg.extraArgs
                 );
 
                 Environment = [
