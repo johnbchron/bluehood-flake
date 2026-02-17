@@ -87,16 +87,20 @@
       #   home-manager.users.you = { imports = [ inputs.bluehood.homeManagerModules.default ]; ... };
       #
       # ⚠  Bluetooth scanning requires CAP_NET_ADMIN + CAP_NET_RAW.
-      #    On NixOS, grant them at the system level:
+      #    Grant them at the NixOS system level via a security wrapper:
       #
       #      security.wrappers.bluehood = {
-      #        source = "${inputs.bluehood.packages.${system}.default}/bin/bluehood";
+      #        source = "${inputs.bluehood.packages.${pkgs.stdenv.hostPlatform.system}.default}/bin/bluehood";
       #        capabilities = "cap_net_admin,cap_net_raw+eip";
       #        owner = "root"; group = "root";
       #      };
       #
-      #    Then set `services.bluehood.package = /run/wrappers/bin/bluehood;`
-      #    or just run the service as root via a NixOS systemd service instead.
+      #    Then point the HM service at the wrapper binary:
+      #
+      #      services.bluehood.executable = "/run/wrappers/bin/bluehood";
+      #
+      #    The security wrapper sets file capabilities on the binary itself,
+      #    so the user service does NOT need AmbientCapabilities/CapabilityBoundingSet.
       homeManagerModules.default = { config, lib, pkgs, ... }:
         let
           cfg = config.services.bluehood;
@@ -110,7 +114,21 @@
               type = lib.types.package;
               default = defaultPkg;
               defaultText = lib.literalExpression "bluehood from this flake";
-              description = "The bluehood package to use.";
+              description = "The bluehood package to use (sets the default executable path).";
+            };
+
+            executable = lib.mkOption {
+              type = lib.types.str;
+              defaultText = lib.literalExpression ''"''${config.services.bluehood.package}/bin/bluehood"'';
+              description = ''
+                Path to the bluehood executable. Override this to use a NixOS security
+                wrapper that has file capabilities set (cap_net_admin, cap_net_raw):
+
+                  services.bluehood.executable = "/run/wrappers/bin/bluehood";
+
+                The security wrapper grants capabilities via setcap on the binary, so
+                no AmbientCapabilities or CapabilityBoundingSet are needed in the service.
+              '';
             };
 
             port = lib.mkOption {
@@ -143,6 +161,9 @@
           };
 
           config = lib.mkIf cfg.enable {
+            # Wire up the executable default here so cfg.package is in scope.
+            services.bluehood.executable = lib.mkDefault "${cfg.package}/bin/bluehood";
+
             systemd.user.services.bluehood = {
               Unit = {
                 Description = "Bluehood Bluetooth neighborhood monitor";
@@ -153,7 +174,7 @@
 
               Service = {
                 ExecStart = lib.escapeShellArgs (
-                  [ "${cfg.package}/bin/bluehood"
+                  [ cfg.executable
                     "--port" (toString cfg.port)
                     "--adapter" cfg.adapter
                   ] ++ cfg.extraArgs
@@ -166,11 +187,10 @@
                 Restart = "on-failure";
                 RestartSec = "5s";
 
-                # Bluetooth scanning requires these capabilities.
-                # They are silently ignored if not in the user's bounding set —
-                # see the module comment above for the NixOS security.wrappers approach.
-                AmbientCapabilities = "CAP_NET_ADMIN CAP_NET_RAW";
-                CapabilityBoundingSet = "CAP_NET_ADMIN CAP_NET_RAW";
+                # Capabilities are NOT set here — user systemd sessions cannot raise
+                # ambient capabilities they don't already have in their permitted set.
+                # Use a NixOS security.wrappers entry (setcap) and point
+                # services.bluehood.executable at /run/wrappers/bin/bluehood instead.
               };
 
               Install = {
