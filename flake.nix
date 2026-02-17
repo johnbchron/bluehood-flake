@@ -100,7 +100,7 @@
       homeManagerModules.default = { config, lib, pkgs, ... }:
         let
           cfg = config.services.bluehood;
-          defaultPkg = self.packages.${pkgs.system}.default;
+          defaultPkg = self.packages.${pkgs.stdenv.hostPlatform.system}.default;
         in
         {
           options.services.bluehood = {
